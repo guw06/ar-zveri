@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Зверьки рядом — AR-охота</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- A-Frame + AR.js (GPS-режим, версия 3) -->
+<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+<script src="https://raw.githack.com/AR-js-org/AR.js/3.4.5/aframe/build/aframe-ar-nft.js"></script>
+
+<style>
+  :root{
+    --ink:#1d1b4b;        /* контур и текст */
+    --paper:#fff8e7;      /* карточки */
+    --pink:#ff5c8a;
+    --sun:#ffc83d;
+    --sky:#4cc9f0;
+    --mint:#7be0ad;
+    --r:18px;
+    font-family:"Fredoka",ui-rounded,"SF Pro Rounded",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;color:var(--ink)}
+  a-scene{position:fixed;inset:0}
+  /* видео с камеры от AR.js */
+  video{object-fit:cover}
+
+  .sticker{
+    background:var(--paper);
+    border:3px solid var(--ink);
+    border-radius:var(--r);
+    box-shadow:0 4px 0 var(--ink);
+  }
+
+  /* ---------- стартовый экран ---------- */
+  #start{
+    position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;padding:28px;text-align:center;
+    background:
+      radial-gradient(circle at 20% 15%, #ffe28a 0 90px, transparent 91px),
+      radial-gradient(circle at 85% 80%, #ff9bb7 0 120px, transparent 121px),
+      radial-gradient(circle at 80% 12%, #8fe3f7 0 60px, transparent 61px),
+      var(--sky);
+  }
+  #start h1{margin:0;font-size:clamp(40px,12vw,64px);line-height:.95;font-weight:700;
+    color:var(--paper);-webkit-text-stroke:3px var(--ink);paint-order:stroke fill;
+    text-shadow:0 5px 0 var(--ink);transform:rotate(-3deg)}
+  #start p{margin:0;max-width:30ch;font-size:18px;font-weight:500}
+  #startMobs{display:flex;gap:8px;font-size:44px}
+  #startMobs span{animation:hop 1.6s ease-in-out infinite}
+  #startMobs span:nth-child(2){animation-delay:.2s}
+  #startMobs span:nth-child(3){animation-delay:.4s}
+  @keyframes hop{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
+  .btn{
+    font:inherit;font-weight:700;font-size:20px;color:var(--ink);cursor:pointer;
+    background:var(--sun);border:3px solid var(--ink);border-radius:999px;
+    padding:14px 34px;box-shadow:0 5px 0 var(--ink);
+  }
+  .btn:active{transform:translateY(4px);box-shadow:0 1px 0 var(--ink)}
+  .btn[disabled]{background:#d9d2bd;color:#7b7660;box-shadow:0 3px 0 #7b7660;border-color:#7b7660}
+  #startNote{font-size:14px;opacity:.8}
+  #startErr{color:#9d0b3a;font-weight:600;min-height:1.2em}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;z-index:20;pointer-events:none;display:none}
+  #hud > *{pointer-events:auto}
+  .top{
+    position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 10px);
+    display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+  }
+  #targetCard{padding:8px 14px;display:flex;align-items:center;gap:10px;min-width:0}
+  #targetEmoji{font-size:34px;line-height:1}
+  #targetName{font-weight:700;font-size:18px;line-height:1.1}
+  #targetDist{font-size:14px;font-weight:500}
+  #bagBtn{padding:8px 14px;font:inherit;font-weight:700;font-size:18px;color:var(--ink);cursor:pointer}
+  #bagBtn:active{transform:translateY(3px);box-shadow:0 1px 0 var(--ink)}
+
+  #radarWrap{
+    position:absolute;right:12px;top:calc(env(safe-area-inset-top,0px) + 82px);
+    width:112px;height:112px;border-radius:50%;padding:0;overflow:hidden;
+  }
+  #radar{width:100%;height:100%;display:block}
+
+  /* стрелка-навигатор к ближайшему зверьку */
+  #navArrow{
+    position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 86px);
+    width:64px;height:64px;margin-left:-32px;
+    display:flex;align-items:center;justify-content:center;
+    border-radius:50%;
+  }
+  #navArrow svg{width:40px;height:40px;transition:transform .15s linear}
+
+  .bottom{
+    position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 22px);
+    display:flex;flex-direction:column;align-items:center;gap:10px;
+  }
+  #hint{padding:7px 16px;font-weight:600;font-size:15px;text-align:center;max-width:86vw}
+  #catchBtn{
+    width:92px;height:92px;border-radius:50%;padding:0;cursor:pointer;
+    font:inherit;font-weight:700;font-size:16px;color:var(--ink);
+    background:#e9e3cf;border:4px solid var(--ink);box-shadow:0 6px 0 var(--ink);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    position:relative;
+  }
+  #catchBtn::before{ /* полоса по центру, как у шара */
+    content:"";position:absolute;left:0;right:0;top:50%;height:4px;background:var(--ink);margin-top:-2px;
+  }
+  #catchBtn span{position:relative;z-index:1;background:inherit;padding:0 4px;border-radius:8px}
+  #catchBtn.ready{background:var(--pink);animation:pulse 1s ease-in-out infinite}
+  #catchBtn:active{transform:translateY(5px);box-shadow:0 1px 0 var(--ink)}
+  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+
+  /* ---------- тост ---------- */
+  #toast{
+    position:fixed;left:50%;top:38%;z-index:40;transform:translate(-50%,-50%) scale(.6);
+    padding:16px 26px;text-align:center;font-weight:700;font-size:22px;opacity:0;pointer-events:none;
+    transition:transform .25s cubic-bezier(.3,1.6,.5,1),opacity .2s;
+  }
+  #toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #toast .big{font-size:56px;display:block;line-height:1.1}
+
+  /* ---------- коллекция ---------- */
+  #bag{
+    position:fixed;inset:0;z-index:45;display:none;background:rgba(29,27,75,.55);
+    align-items:flex-end;justify-content:center;
+  }
+  #bag.open{display:flex}
+  #bagPanel{
+    width:min(560px,100%);max-height:78vh;overflow:auto;padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 18px);
+    border-radius:26px 26px 0 0;border-bottom:none;
+  }
+  #bagPanel h2{margin:0 0 4px;font-size:26px}
+  #bagPanel .sub{margin:0 0 14px;font-weight:500}
+  #grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .cell{border:3px solid var(--ink);border-radius:14px;padding:10px 4px;text-align:center;background:#fff}
+  .cell .e{font-size:38px;line-height:1.1}
+  .cell .n{font-size:13px;font-weight:600}
+  .cell .c{font-size:12px;font-weight:500;opacity:.75}
+  .cell.empty{background:#e9e3cf}
+  .cell.empty .e{filter:grayscale(1) brightness(.35);opacity:.6}
+  #bagClose{margin-top:16px;width:100%}
+
+  @media (prefers-reduced-motion:reduce){
+    #startMobs span,#catchBtn.ready{animation:none}
+  }
+</style>
+</head>
+<body>
+
+<!-- Стартовый экран -->
+<div id="start">
+  <div id="startMobs"><span>🐣</span><span>🦊</span><span>🐙</span></div>
+  <h1>Зверьки<br>рядом</h1>
+  <p>Выйдите на улицу, наведите камеру и найдите зверьков поблизости. Подойдите — и поймайте!</p>
+  <button class="btn" id="startBtn">Начать охоту</button>
+  <div id="startErr"></div>
+  <div id="startNote">Нужны доступ к камере и геолокации. Лучше всего работает на улице.</div>
+</div>
+
+<!-- HUD поверх камеры -->
+<div id="hud">
+  <div class="top">
+    <div id="targetCard" class="sticker">
+      <div id="targetEmoji">🔍</div>
+      <div>
+        <div id="targetName">Ищем…</div>
+        <div id="targetDist">определяем место</div>
+      </div>
+    </div>
+    <button id="bagBtn" class="sticker">🎒 <span id="bagCount">0</span></button>
+  </div>
+
+  <div id="navArrow" class="sticker">
+    <svg id="arrowSvg" viewBox="0 0 40 40"><path d="M20 4 L33 32 L20 25 L7 32 Z" fill="#ff5c8a" stroke="#1d1b4b" stroke-width="3" stroke-linejoin="round"/></svg>
+  </div>
+
+  <div id="radarWrap" class="sticker"><canvas id="radar" width="224" height="224"></canvas></div>
+
+  <div class="bottom">
+    <div id="hint" class="sticker">Идите к зверьку</div>
+    <button id="catchBtn" disabled><span>Поймать</span></button>
+  </div>
+</div>
+
+<div id="toast" class="sticker"></div>
+
+<div id="bag">
+  <div id="bagPanel" class="sticker">
+    <h2>Моя коллекция</h2>
+    <p class="sub" id="bagSub"></p>
+    <div id="grid"></div>
+    <button class="btn" id="bagClose">Назад к охоте</button>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   НАСТРОЙКИ — можно менять
+   ========================================================= */
+const CFG = {
+  mobsOnMap: 4,        // сколько зверьков одновременно вокруг
+  spawnMin: 5,         // минимальное расстояние появления, м
+  spawnMax: 15,        // максимальное расстояние появления, м
+  catchRange: 12,      // с какого расстояния можно ловить, м
+  catchAngle: 35,      // насколько точно надо смотреть на зверька, градусов (в каждую сторону)
+  radarRange: 20,      // радиус радара, м
+  respawnMs: 2500
+};
+
+/* Виды зверьков: тело, живот, уши и т.п. */
+const SPECIES = [
+  { id:'puhlya',  name:'Пухля',   emoji:'🐣', body:'#ffd84d', belly:'#fff3b0', accent:'#ff9f1c', ears:'round' },
+  { id:'iskrik',  name:'Искрик',  emoji:'🦊', body:'#ff8a3d', belly:'#ffe2c4', accent:'#7a2e0e', ears:'point' },
+  { id:'bubl',    name:'Бубль',   emoji:'🐙', body:'#b58cff', belly:'#e7dbff', accent:'#6a3fd1', ears:'none'  },
+  { id:'oblachko',name:'Облачко', emoji:'☁️', body:'#bfe9ff', belly:'#ffffff', accent:'#4cc9f0', ears:'round' },
+  { id:'mshanka', name:'Мшанка',  emoji:'🐸', body:'#7be0ad', belly:'#e4fbe9', accent:'#1f9d63', ears:'none'  },
+  { id:'rozik',   name:'Розик',   emoji:'🐷', body:'#ff9bb7', belly:'#ffe0e9', accent:'#e0366b', ears:'point' }
+];
+
+/* =========================================================
+   Утилиты
+   ========================================================= */
+const $ = id => document.getElementById(id);
+const R = 6371000, toRad = d => d*Math.PI/180, toDeg = r => r*180/Math.PI;
+
+function distanceM(a, b){
+  const dLat = toRad(b.lat-a.lat), dLon = toRad(b.lon-a.lon);
+  const h = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function bearingDeg(a, b){          // 0 = север, 90 = восток
+  const y = Math.sin(toRad(b.lon-a.lon))*Math.cos(toRad(b.lat));
+  const x = Math.cos(toRad(a.lat))*Math.sin(toRad(b.lat)) - Math.sin(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.cos(toRad(b.lon-a.lon));
+  return (toDeg(Math.atan2(y,x))+360)%360;
+}
+const angDiff = (a,b) => ((a-b+540)%360)-180;   // -180..180
+
+/* =========================================================
+   Состояние
+   ========================================================= */
+let pos = null;            // {lat, lon} — текущая позиция игрока
+let mobs = [];             // активные зверьки {id, species, lat, lon, el}
+let nextId = 1;
+let spawned = false;
+let collection = {};       // {speciesId: count}
+try { collection = JSON.parse(localStorage.getItem('zveri-bag') || '{}'); } catch(e){}
+const saveBag = () => { try { localStorage.setItem('zveri-bag', JSON.stringify(collection)); } catch(e){} };
+
+/* =========================================================
+   Компонент: зверёк всегда смотрит на игрока
+   ========================================================= */
+AFRAME.registerComponent('face-camera', {
+  tick(){
+    const cam = this.el.sceneEl.camera;
+    if(!cam) return;
+    const p = new THREE.Vector3();
+    cam.getWorldPosition(p);
+    const me = this.el.object3D.getWorldPosition(new THREE.Vector3());
+    this.el.object3D.rotation.y = Math.atan2(p.x - me.x, p.z - me.z);
+  }
+});
+
+/* =========================================================
+   Построение зверька из простых фигур A-Frame
+   ========================================================= */
+function buildMobHTML(sp){
+  const ears = sp.ears === 'round'
+    ? `<a-sphere position="-0.32 0.62 0" radius="0.17" color="${sp.accent}"></a-sphere>
+       <a-sphere position="0.32 0.62 0" radius="0.17" color="${sp.accent}"></a-sphere>`
+    : sp.ears === 'point'
+    ? `<a-cone position="-0.3 0.68 0" radius-bottom="0.17" radius-top="0" height="0.4" color="${sp.accent}" rotation="0 0 12"></a-cone>
+       <a-cone position="0.3 0.68 0" radius-bottom="0.17" radius-top="0" height="0.4" color="${sp.accent}" rotation="0 0 -12"></a-cone>`
+    : '';
+  return `
+    <a-entity animation="property: position; dir: alternate; dur: 700; easing: easeInOutSine; loop: true; from: 0 0 0; to: 0 0.25 0">
+      <a-sphere radius="0.55" color="${sp.body}" scale="1 0.95 0.9"></a-sphere>
+      <a-sphere position="0 -0.12 0.3" radius="0.36" color="${sp.belly}" scale="1 1 0.55"></a-sphere>
+      ${ears}
+      <!-- глаза -->
+      <a-sphere position="-0.2 0.14 0.43" radius="0.12" color="#ffffff"></a-sphere>
+      <a-sphere position="0.2 0.14 0.43" radius="0.12" color="#ffffff"></a-sphere>
+      <a-sphere position="-0.2 0.14 0.53" radius="0.06" color="#1d1b4b"></a-sphere>
+      <a-sphere position="0.2 0.14 0.53" radius="0.06" color="#1d1b4b"></a-sphere>
+      <!-- щёки и рот -->
+      <a-sphere position="-0.36 -0.05 0.38" radius="0.08" color="#ff7a9c" scale="1 .7 .5"></a-sphere>
+      <a-sphere position="0.36 -0.05 0.38" radius="0.08" color="#ff7a9c" scale="1 .7 .5"></a-sphere>
+      <a-torus position="0 -0.02 0.5" radius="0.07" radius-tubular="0.012" arc="180" rotation="0 0 180" color="#1d1b4b"></a-torus>
+      <!-- лапки -->
+      <a-sphere position="-0.26 -0.52 0.1" radius="0.15" color="${sp.accent}"></a-sphere>
+      <a-sphere position="0.26 -0.52 0.1" radius="0.15" color="${sp.accent}"></a-sphere>
+    </a-entity>`;
+}
+
+function spawnMob(){
+  if(!pos) return;
+  const sp = SPECIES[Math.floor(Math.random()*SPECIES.length)];
+  const r = CFG.spawnMin + Math.random()*(CFG.spawnMax-CFG.spawnMin);
+  const ang = Math.random()*Math.PI*2;
+  const lat = pos.lat + (r*Math.cos(ang))/111320;
+  const lon = pos.lon + (r*Math.sin(ang))/(111320*Math.cos(toRad(pos.lat)));
+
+  const el = document.createElement('a-entity');
+  el.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lon}`);
+  el.setAttribute('face-camera', '');
+  /* чем дальше зверёк, тем он крупнее — иначе на 60 м его не разглядеть */
+  const s = Math.max(0.9, r/10);
+  el.setAttribute('scale', `${s} ${s} ${s}`);
+  el.innerHTML = buildMobHTML(sp);
+  $('scene').appendChild(el);
+
+  mobs.push({ id: nextId++, sp, lat, lon, el });
+}
+
+function fillMobs(){
+  while(mobs.length < CFG.mobsOnMap) spawnMob();
+}
+
+/* =========================================================
+   Игровой цикл HUD (5 раз в секунду)
+   ========================================================= */
+function heading(){
+  const cam = $('scene').camera;
+  if(!cam) return 0;
+  const v = new THREE.Vector3();
+  cam.getWorldDirection(v);
+  return (toDeg(Math.atan2(v.x, -v.z)) + 360) % 360;   // север = -Z
+}
+
+function nearestMob(){
+  let best = null;
+  for(const m of mobs){
+    m.dist = distanceM(pos, m);
+    if(!best || m.dist < best.dist) best = m;
+  }
+  return best;
+}
+
+const radar = $('radar'), rctx = radar.getContext('2d');
+function drawRadar(h){
+  const W = radar.width, C = W/2, rad = C-6;
+  rctx.clearRect(0,0,W,W);
+  rctx.fillStyle = '#fff8e7'; rctx.fillRect(0,0,W,W);
+  rctx.strokeStyle = '#1d1b4b'; rctx.lineWidth = 2; rctx.globalAlpha = .25;
+  for(const k of [1,.66,.33]){ rctx.beginPath(); rctx.arc(C,C,rad*k,0,7); rctx.stroke(); }
+  rctx.globalAlpha = 1;
+
+  // сектор «куда смотрит камера»
+  rctx.fillStyle = 'rgba(76,201,240,.45)';
+  rctx.beginPath(); rctx.moveTo(C,C);
+  rctx.arc(C,C,rad,toRad(-90-35),toRad(-90+35)); rctx.closePath(); rctx.fill();
+
+  // зверьки: радар повёрнут так, что «вверх» = куда смотрим
+  for(const m of mobs){
+    const d = Math.min(m.dist, CFG.radarRange);
+    const a = toRad(bearingDeg(pos, m) - h - 90);
+    const x = C + Math.cos(a)*rad*(d/CFG.radarRange);
+    const y = C + Math.sin(a)*rad*(d/CFG.radarRange);
+    rctx.fillStyle = m.dist <= CFG.catchRange ? '#ff5c8a' : '#ffc83d';
+    rctx.strokeStyle = '#1d1b4b'; rctx.lineWidth = 3;
+    rctx.beginPath(); rctx.arc(x,y,10,0,7); rctx.fill(); rctx.stroke();
+  }
+  // игрок
+  rctx.fillStyle = '#1d1b4b';
+  rctx.beginPath(); rctx.arc(C,C,8,0,7); rctx.fill();
+  // север
+  const na = toRad(-h - 90);
+  rctx.fillStyle = '#1d1b4b'; rctx.font = '700 22px Fredoka, sans-serif';
+  rctx.textAlign = 'center'; rctx.textBaseline = 'middle';
+  rctx.fillText('С', C + Math.cos(na)*(rad-14), C + Math.sin(na)*(rad-14));
+}
+
+function tickHud(){
+  if(!pos) return;
+  const h = heading();
+  const t = nearestMob();
+  if(!t){ return; }
+
+  const brg = bearingDeg(pos, t);
+  const diff = angDiff(brg, h);                      // + значит поворачивать вправо
+
+  $('targetEmoji').textContent = t.sp.emoji;
+  $('targetName').textContent = t.sp.name;
+  $('targetDist').textContent = `${Math.round(t.dist)} м · ${compassWord(brg)}`;
+  $('arrowSvg').style.transform = `rotate(${diff}deg)`;
+
+  const inRange = t.dist <= CFG.catchRange;
+  const aimed = Math.abs(diff) <= CFG.catchAngle;
+  const ready = inRange && aimed;
+  const btn = $('catchBtn');
+  btn.disabled = !ready;
+  btn.classList.toggle('ready', ready);
+
+  let hint;
+  if(ready) hint = `Лови ${t.sp.name}!`;
+  else if(inRange) hint = diff > 0 ? 'Повернитесь вправо ➜' : '⬅ Повернитесь влево';
+  else if(Math.abs(diff) > 25) hint = diff > 0 ? 'Повернитесь вправо ➜' : '⬅ Повернитесь влево';
+  else hint = 'Идите прямо к зверьку';
+  $('hint').textContent = hint;
+
+  drawRadar(h);
+}
+
+function compassWord(b){
+  const names = ['на север','на северо-восток','на восток','на юго-восток','на юг','на юго-запад','на запад','на северо-запад'];
+  return names[Math.round(b/45)%8];
+}
+
+/* =========================================================
+   Поимка
+   ========================================================= */
+function catchTarget(){
+  if(!pos) return;
+  const t = nearestMob();
+  if(!t || t.dist > CFG.catchRange) return;
+
+  collection[t.sp.id] = (collection[t.sp.id]||0) + 1;
+  saveBag();
+  updateBagCount();
+  if(navigator.vibrate) navigator.vibrate([40,40,80]);
+
+  t.el.setAttribute('animation__out','property: scale; to: 0 0 0; dur: 350; easing: easeInBack');
+  setTimeout(()=>{ t.el.remove(); }, 380);
+  mobs = mobs.filter(m => m !== t);
+
+  const isNew = collection[t.sp.id] === 1;
+  showToast(`<span class="big">${t.sp.emoji}</span>${t.sp.name} пойман!${isNew ? '<br><small>Новый в коллекции</small>' : ''}`);
+  setTimeout(fillMobs, CFG.respawnMs);
+}
+
+let toastTimer;
+function showToast(html){
+  const t = $('toast'); t.innerHTML = html; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+/* =========================================================
+   Коллекция
+   ========================================================= */
+function updateBagCount(){
+  $('bagCount').textContent = Object.values(collection).reduce((a,b)=>a+b,0);
+}
+function openBag(){
+  const got = SPECIES.filter(s => collection[s.id]).length;
+  $('bagSub').textContent = `Открыто видов: ${got} из ${SPECIES.length}`;
+  $('grid').innerHTML = SPECIES.map(s => {
+    const n = collection[s.id] || 0;
+    return `<div class="cell ${n?'':'empty'}">
+      <div class="e">${s.emoji}</div>
+      <div class="n">${n ? s.name : '???'}</div>
+      <div class="c">${n ? 'поймано: '+n : 'не найден'}</div></div>`;
+  }).join('');
+  $('bag').classList.add('open');
+}
+
+/* =========================================================
+   Старт: разрешения → сцена → GPS
+   ========================================================= */
+async function start(){
+  const err = $('startErr'); err.textContent = '';
+  $('startBtn').disabled = true;
+
+  // 1. Компас на iOS требует явного разрешения по тапу
+  try{
+    if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      const r = await DeviceOrientationEvent.requestPermission();
+      if(r !== 'granted') throw new Error('Нет доступа к компасу. Разрешите «Движение и ориентация» в настройках Safari.');
+    }
+  }catch(e){ err.textContent = e.message; $('startBtn').disabled = false; return; }
+
+  // 2. Геолокация
+  if(!('geolocation' in navigator)){
+    err.textContent = 'Геолокация не поддерживается этим браузером.';
+    $('startBtn').disabled = false; return;
+  }
+  err.textContent = 'Определяем место… до 30 секунд';
+  const ok = p => { pos = { lat:p.coords.latitude, lon:p.coords.longitude }; err.textContent = ''; launchScene(); };
+  const fail = e => {
+    const why = e.code === 1 ? 'Доступ к геолокации запрещён (проверьте также, что GPS включён в шторке телефона).'
+              : e.code === 2 ? 'Телефон не смог определить место. Включите GPS / геолокацию и выйдите на открытое место.'
+              : 'Время ожидания вышло. Выйдите на улицу и нажмите снова.';
+    err.textContent = `${why} [код ${e.code}: ${e.message || 'нет текста'}]`;
+    $('startBtn').disabled = false;
+  };
+  // 1) точный GPS; 2) если не вышло — грубое определение по сети/Wi-Fi
+  navigator.geolocation.getCurrentPosition(ok, e => {
+    if(e.code === 1) return fail(e);
+    navigator.geolocation.getCurrentPosition(ok, fail,
+      { enableHighAccuracy:false, timeout:15000, maximumAge:60000 });
+  }, { enableHighAccuracy:true, timeout:15000, maximumAge:30000 });
+}
+
+function launchScene(){
+  const scene = document.createElement('a-scene');
+  scene.id = 'scene';
+  scene.setAttribute('vr-mode-ui','enabled: false');
+  scene.setAttribute('arjs','sourceType: webcam; videoTexture: true; debugUIEnabled: false;');
+  scene.setAttribute('renderer','antialias: true; alpha: true');
+  scene.innerHTML = `
+    <a-camera gps-new-camera="gpsMinDistance: 1; simulateLatitude: 0" look-controls-enabled="false"></a-camera>
+    <a-entity light="type: ambient; intensity: 1.1"></a-entity>
+    <a-entity light="type: directional; intensity: .8" position="1 3 2"></a-entity>`;
+  document.body.prepend(scene);
+
+  // реальный GPS-апдейт от камеры
+  const cam = scene.querySelector('a-camera');
+  cam.addEventListener('gps-camera-update-position', e => {
+    pos = { lat:e.detail.position.latitude, lon:e.detail.position.longitude };
+    if(!spawned){ spawned = true; fillMobs(); }
+  });
+
+  // запасной вариант, если событие не пришло
+  setTimeout(()=>{ if(!spawned){ spawned = true; fillMobs(); } }, 5000);
+
+  $('start').style.display = 'none';
+  $('hud').style.display = 'block';
+  updateBagCount();
+  setInterval(tickHud, 200);
+}
+
+$('startBtn').addEventListener('click', start);
+$('catchBtn').addEventListener('click', catchTarget);
+$('bagBtn').addEventListener('click', openBag);
+$('bagClose').addEventListener('click', ()=> $('bag').classList.remove('open'));
+</script>
+</body>
+</html>
